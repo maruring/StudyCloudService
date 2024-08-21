@@ -1,0 +1,376 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "RDS Import Data by Lambda via S3 Stack"
+Parameters:
+  ApplicationName:
+    Type: String
+    Default: 'import-data-from-s3'
+  VpcCidr:
+    Type: String
+    Default: '10.1.0.0/16'
+  PublicSubnetCidr1:
+    Type: String
+    Default: '10.1.10.0/24'
+  PublicSubnetCidr2:
+    Type: String
+    Default: '10.1.20.0/24'
+  PrivateSubnetCidr1:
+    Type: String
+    Default: '10.1.100.0/24'
+  PrivateSubnetCidr2:
+    Type: String
+    Default: '10.1.200.0/24'
+  MasterUsername:
+    Type: String
+    Default: RootUserName
+  MasterUserPassword:
+    Type: String
+    Default: RootPassword
+  DbPort:
+    Type: Number
+    Default: 3306
+  S3Bucket:
+    Type: String
+    Default: rds-init
+
+# ------------------------------------------------------------#
+# Mappings
+# ------------------------------------------------------------#  
+Mappings:
+  Constant:
+    RDS:
+      DatabaseName: auroradb
+      InstanceClass: db.t4g.medium
+
+Resources:
+# ------------------------------------------------------------#
+#  VPC
+# ------------------------------------------------------------#  
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: "true"
+      EnableDnsSupport: "true"
+      InstanceTenancy: "default"
+  InternetGateway: 
+    Type: AWS::EC2::InternetGateway
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+# ------------------------------------------------------------#
+#  Subnet
+# ------------------------------------------------------------#  
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      CidrBlock: !Ref PublicSubnetCidr1
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select 
+        - 0
+        - Fn::GetAZs: !Ref "AWS::Region"
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      CidrBlock: !Ref PublicSubnetCidr2
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref "AWS::Region"
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      CidrBlock: !Ref PrivateSubnetCidr1
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref "AWS::Region"
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      CidrBlock: !Ref PrivateSubnetCidr2
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref "AWS::Region"
+# ------------------------------------------------------------#
+#  RouteTable
+# ------------------------------------------------------------#  
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+# ------------------------------------------------------------#
+# Routing
+# ------------------------------------------------------------# 
+  PublicRoute: 
+    Type: AWS::EC2::Route
+    Properties: 
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+# ------------------------------------------------------------#
+# S3 EndPoint
+# ------------------------------------------------------------# 
+  S3VpcEndPoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcId: !Ref VPC
+      VpcEndpointType: "Gateway"
+      PrivateDnsEnabled: "false"
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+# ------------------------------------------------------------#
+# RouteTable Associate
+# ------------------------------------------------------------# 
+  PublicSubnetRouteTableAssociation1: 
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+  PrivateSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+  PrivateSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+# ------------------------------------------------------------#
+# Lambda Secrity Group
+# ------------------------------------------------------------#
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupName: Lambda-sg
+      GroupDescription: Lambda Secrity Group
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: -1
+# ------------------------------------------------------------#
+# RDS Secrity Group
+# ------------------------------------------------------------#
+  RdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupName: Rds-sg
+      GroupDescription: RDS Secrity Group
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: !Ref DbPort
+          ToPort: !Ref DbPort
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+# ------------------------------------------------------------#
+# S3 Access IAM Role
+# ------------------------------------------------------------#
+  AuroraS3AccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ApplicationName}-DB-Access-S3
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+# ------------------------------------------------------------#
+# DBSubnetGroup
+# ------------------------------------------------------------#
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub ${ApplicationName} DB Subnet Group
+      DBSubnetGroupName: !Sub ${ApplicationName}
+      SubnetIds: 
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+# ------------------------------------------------------------#
+# DB Cluster Parameter Group
+# ------------------------------------------------------------#
+  DBClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      DBClusterParameterGroupName: !Sub ${ApplicationName}-DbClusterParamGroup
+      Description: !Sub ${ApplicationName} DbClusterParamGroup
+      Family: aurora-mysql8.0
+      Parameters:
+        time_zone: 'Asia/Tokyo'
+        aws_default_s3_role: !GetAtt AuroraS3AccessRole.Arn
+# ------------------------------------------------------------#
+# DB Cluster
+# ------------------------------------------------------------#
+  DBCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DatabaseName: !FindInMap [Constant, RDS, DatabaseName]
+      AssociatedRoles:
+        - RoleArn: !GetAtt AuroraS3AccessRole.Arn
+      AvailabilityZones:
+        - !Sub ${AWS::Region}c
+        - !Sub ${AWS::Region}a
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Engine: aurora-mysql
+      EngineMode: provisioned
+      EngineVersion: '8.0'
+      Port: !Ref DbPort
+      DBClusterIdentifier: !Sub ${ApplicationName}-data-base-cluster
+      DBClusterParameterGroupName: !Ref DBClusterParameterGroup
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      StorageEncrypted: true
+      VpcSecurityGroupIds:
+        - !Ref RdsSecurityGroup
+# ------------------------------------------------------------#
+# DB Instance
+# ------------------------------------------------------------#
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DependsOn: DBCluster
+    Properties:
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      DBInstanceClass: !FindInMap [Constant, RDS, InstanceClass]
+      DBClusterIdentifier: !Ref DBCluster
+      Engine: aurora-mysql
+      EngineVersion: '8.0'
+      DBInstanceIdentifier: !Sub ${ApplicationName}-data-base-instance
+# ------------------------------------------------------------#
+# Lambda Role
+# ------------------------------------------------------------#
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ApplicationName}-lambda"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonRDSFullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+# ------------------------------------------------------------#
+# Lambda Layer
+# ------------------------------------------------------------#
+  LambdaLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Sub ${ApplicationName}-Layer
+      Description: !Sub ${ApplicationName} Lambda Layer
+      CompatibleArchitectures: 
+        - arm64
+      CompatibleRuntimes: 
+        - python3.10
+      Content: 
+        S3Bucket: !Ref S3Bucket
+        S3Key: rds-layer.zip
+# ------------------------------------------------------------#
+# Lambda
+# ------------------------------------------------------------#
+  Lambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: RDS初期プロセス
+      FunctionName: rds-init-process
+      Role: !GetAtt LambdaRole.Arn
+      Handler: lambda_rds_init_process.handler
+      Architectures:
+        - arm64
+      Runtime: python3.10
+      MemorySize: 256
+      Timeout: 600
+      Layers: 
+        - !Ref LambdaLayer
+      VpcConfig:
+        Ipv6AllowedForDualStack: false
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt DBCluster.Endpoint.Address
+          DB_USER_NAME: !Ref MasterUsername
+          DB_PASSWORD: !Ref MasterUserPassword
+          DB_NAME: !FindInMap [Constant, RDS, DatabaseName]
+          DB_PORT: !Ref DbPort
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: lambda.zip
+# ------------------------------------------------------------#
+# Event Bridge IAM Role
+# ------------------------------------------------------------#
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ApplicationName}-event-bridge"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: events.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSLambda_FullAccess
+# ------------------------------------------------------------#
+# RDS Init Process Rule
+# ------------------------------------------------------------#
+  RdsStartRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${ApplicationName}
+      Description: RDS Init Process
+      RoleArn: !GetAtt EventBridgeRole.Arn
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.rds
+        detail-type:
+          - DS DB Instance Event
+        detail.EventID:
+          - RDS-EVENT-0005
+      Targets: 
+        - 
+          Arn: !GetAtt Lambda.Arn
+          Id: TempId123
+          Input: !Sub |
+            {
+              "bucket_name": "${S3Bucket}",
+              "object_key": "init_data.json",
+              "application_name": "${ApplicationName}",
+              "table_name": "users"
+            }
+# ------------------------------------------------------------#
+# Lambda RDS Init Process Permission
+# ------------------------------------------------------------#
+  PermissionForEventsToInvokeLambda: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref Lambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt RdsStartRule.Arn

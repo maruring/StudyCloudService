@@ -1,0 +1,8 @@
+{
+    "import-data-from-s3": {
+        "users": [
+            {"name": "Tom", "age": 25, "mail_address": "tom@test.com"},
+            {"name": "Dency", "age": 49, "mail_address": "dency@example.com"}
+        ]
+    }
+}
