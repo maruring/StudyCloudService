@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AWS Integration Practice"
+Transform: AWS::Serverless-2016-10-31
+Parameters:
+  ApplicationName:
+    Type: String
+    Default: aws-integration-practice
+
+Resources:
+  DynamoDB:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref ApplicationName
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      AttributeDefinitions:
+        - AttributeName: 'userId'
+          AttributeType: 'S'
+      KeySchema:
+        - AttributeName: 'userId'
+          KeyType: 'HASH'
+
+  ApiGatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ApplicationName}-apigateway
+      Description: aws integration
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+
+  ApiGatewayLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ApplicationName}-apigateway-log
+      Description: aws integration
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  ApiGatewayLogSetting:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayLogRole.Arn
+
+
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Ref ApplicationName
+      Description: AWS統合練習
+      StageName: test
+      DefinitionBody:
+        openapi: 3.0.1
+        info:
+          title: !Sub ${ApplicationName} API
+          version: '1.0.0'
+        paths:
+          /user:
+            post:
+              description: 'ユーザー情報登録'
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      title: RegisterUserRequestBody
+                      type: object
+                      properties:
+                        userId:
+                          type: string
+                        name:
+                          type: string
+                        age:
+                          type: number
+              responses:
+                '200':
+                  description: OK
+              x-amazon-apigateway-integration:
+                type: aws
+                httpMethod: POST
+                credentials: !GetAtt ApiGatewayRole.Arn
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:dynamodb:action/PutItem
+                integrationHttpMethod: POST
+                passthroughBehavior: when_no_templates
+                responses:
+                  default:
+                    statusCode: 200
+                requestTemplates:
+                  application/json: !Sub |
+                    #set($inputRoot = $input.path('$'))
+                    {
+                      "TableName": "${DynamoDB}",
+                      "Item": {
+                        "userId": {
+                          "S": "$inputRoot.userId"
+                        },
+                        "name": {
+                          "S": "$inputRoot.name"
+                        },
+                        "age": {
+                          "N": "$inputRoot.age"
+                        }
+                      }
+                    }
+          /user/{userId}:
+            get:
+              description: 'ユーザー情報取得'
+              parameters:
+                - name: userId
+                  in: path
+                  description: ユーザー名
+                  type: string
+              responses:
+                '200':
+                  description: Successful response
+                  content:
+                    application/json:
+                      schema:
+                        title: GetUserResponseSuccess
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                            description: 名前
+                          age:
+                            type: number
+                            description: 年齢
+              x-amazon-apigateway-integration:
+                type: aws
+                httpMethod: POST
+                credentials: !GetAtt ApiGatewayRole.Arn
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:dynamodb:action/GetItem
+                integrationHttpMethod: POST
+                passthroughBehavior: when_no_templates
+                requestParameters:
+                  integration.request.path.userId: method.request.path.userId
+                requestTemplates:
+                  application/json: !Sub |
+                    {
+                      "TableName": "${DynamoDB}",
+                      "Key": {
+                        "userId":{
+                          "S": "$input.params('userId')"
+                        }
+                      }
+                    }
+                responses:
+                  '200':
+                    statusCode: '200'
+                    responseTemplates:
+                      application/json: |
+                        {
+                            "name": "$input.path('$').Item.name.S",
+                            "age": "$input.path('$').Item.age.N"
+                        }

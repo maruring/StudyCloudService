@@ -502,7 +502,6 @@ lambdaのログを確認するとRDSに初期値が入っていることが確�
 ![](./image/lambda_log.PNG)  
 
 
-
 # 他の初期データ投入方法の記事
 - [Amazon RDS DB インスタンスにデータをインポートする方法を教えてください。](https://repost.aws/ja/knowledge-center/rds-import-data)
 - [CloudFormationからLambdaを実行してテーブル情報の入ったRDSを自動作成](https://qiita.com/jimbot3/items/1fcf0be595958e6e6ae8)
