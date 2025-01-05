@@ -62,3 +62,4 @@ cdk deploy
 - [AWS Cloud9のチュートリアル](https://docs.aws.amazon.com/ja_jp/cloud9/latest/user-guide/sample-cdk.html)
 - [手元の Windows 11 端末に AWS CLI をインストールして AWS CLI コマンドを実行する](https://dev.classmethod.jp/articles/install-aws-cli-on-the-windows-11-terminal-at-hand-and-execute-aws-cli-commands/)
 - [cdk コマンドの機能を 実際に叩いて理解する](https://dev.classmethod.jp/articles/aws-cdk-command-line-interface/)
+- [実践！AWS CDK #1 導入](https://dev.classmethod.jp/articles/cdk-practice-1-introduction/)
