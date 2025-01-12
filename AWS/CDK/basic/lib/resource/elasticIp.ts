@@ -15,7 +15,7 @@ export class ElasticIp extends Resource {
     public ngw1a: CfnEIP;
     public ngw1c: CfnEIP;
 
-    private readonly resoucesInfo: ResouceInfo[] =[
+    private readonly resoucesInfo: ResouceInfo[] = [
         {
             id: 'ElasticIpNgw1a',
             resouceName: 'eip-ngw-1a',
