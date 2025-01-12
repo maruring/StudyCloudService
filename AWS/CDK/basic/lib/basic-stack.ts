@@ -5,6 +5,7 @@ import { Construct } from 'constructs';
 import { Vpc } from './resource/vpc';
 import { Subnet } from './resource/subnet';
 import { InternetGateway } from './resource/internet-gateway';
+import { ElasticIp } from './resource/elasticIp';
 
 export class BasicStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -21,5 +22,9 @@ export class BasicStack extends cdk.Stack {
     // InternetGateway
     const internetGateway = new InternetGateway(vpc.vpc);
     internetGateway.createResource(this);
+
+    // EIP
+    const elasticIp = new ElasticIp();
+    elasticIp.createResource(this);
   }
 };
