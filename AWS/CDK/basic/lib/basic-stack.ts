@@ -6,6 +6,8 @@ import { Vpc } from './resource/vpc';
 import { Subnet } from './resource/subnet';
 import { InternetGateway } from './resource/internet-gateway';
 import { ElasticIp } from './resource/elasticIp';
+import { NatGateway } from './resource/nat-gateway';
+import { RouteTable } from './resource/routeTable';
 
 export class BasicStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -26,5 +28,27 @@ export class BasicStack extends cdk.Stack {
     // EIP
     const elasticIp = new ElasticIp();
     elasticIp.createResource(this);
+
+    // NatGateway
+    const natGateway = new NatGateway(
+      elasticIp.ngw1a,
+      elasticIp.ngw1c,
+      subnet.publicSubnet1a,
+      subnet.publicSubnet1c
+    );
+    natGateway.createResource(this);
+
+    // RouteTable
+    const routeTable = new RouteTable(
+      vpc.vpc,
+      subnet.publicSubnet1a,
+      subnet.publicSubnet1c,
+      subnet.privateSubnet1a,
+      subnet.privateSubnet1c,
+      internetGateway.internetGateay,
+      natGateway.natGateway1a,
+      natGateway.natGateway1c
+    );
+    routeTable.createResource(this);
   }
 };
