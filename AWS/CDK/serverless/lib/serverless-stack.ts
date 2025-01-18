@@ -3,6 +3,8 @@ import { Construct } from 'constructs';
 import { CfnBucket } from 'aws-cdk-lib/aws-s3';
 import { CfnTable } from 'aws-cdk-lib/aws-dynamodb';
 import { CfnRole, PolicyDocument, PolicyStatement, PolicyStatementProps, Effect, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { CfnFunction, Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
+import { aws_s3_assets } from 'aws-cdk-lib';
 import { ResolutionTypeHint } from 'aws-cdk-lib';
 // 独自モジュール
 import { EnvProps } from '../bin/serverless';
@@ -15,8 +17,10 @@ export class ServerlessStack extends cdk.Stack {
     const s3BucketArn: string = s3Bucket.getAtt('Arn', ResolutionTypeHint.STRING).toString();
     const dynamoDb = this.createDynamoDB(envProps);
     const dynanoDbArn: string = dynamoDb.getAtt('Arn', ResolutionTypeHint.STRING).toString();
-    const LambdaExecRole = this.createLambdaIamRole(envProps, s3BucketArn, dynanoDbArn);
-  }
+    const lambdaAsset = this.createLambdaAsset(envProps);
+    const lambdaExecRole = this.createLambdaIamRole(envProps, s3BucketArn, dynanoDbArn);
+    const getLambda = this.createGetLambda(envProps, lambdaExecRole, lambdaAsset.s3BucketName, lambdaAsset.s3ObjectKey)
+  };
 
   private createS3Bucket(envProps: EnvProps): CfnBucket {
     const applicationName = envProps.applicationName.toLocaleLowerCase();
@@ -85,6 +89,37 @@ export class ServerlessStack extends cdk.Stack {
     });
 
     return LambdaRole;
+  };
+
+  private createLambdaAsset(envProps: EnvProps): aws_s3_assets.Asset {
+    const lambdaAsset = new aws_s3_assets.Asset(this,
+      `${envProps.envUpperCase}-${envProps.applicationName}-Lambda-Asset`,
+    {
+      path: './lambda'
+    });
+
+    return lambdaAsset;
+  }
+
+  private createGetLambda(envProps: EnvProps, lambdaExecRole: CfnRole, s3Bucket: string, s3Key: string): CfnFunction {
+
+    const lambdaExecRoleArn: string = lambdaExecRole.getAtt('Arn', ResolutionTypeHint.STRING).toString();
+    const getLambda = new CfnFunction(this, `${envProps.envUpperCase}-${envProps.applicationName}-Lambda-GET`, {
+      functionName: `${envProps.applicationName}-GET-${envProps.envUpperCase}`,
+      description: `${envProps.applicationName} GET Method`,
+      architectures: [Architecture.ARM_64.toString()],
+      handler: 'task.getHandler',
+      memorySize: 1024,
+      role: lambdaExecRoleArn,
+      runtime: Runtime.NODEJS_20_X.toString(),
+      timeout: 29,
+      code: {
+        s3Bucket: s3Bucket,
+        s3Key: s3Key
+      }
+    })
+
+    return getLambda;
   }
 
 }
