@@ -79,7 +79,8 @@ export class ServerlessStack extends cdk.Stack {
       // TODO: 最小権限の原則から後でする
       managedPolicyArns: [
         'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess',
-        'arn:aws:iam::aws:policy/AmazonS3FullAccess'
+        'arn:aws:iam::aws:policy/AmazonS3FullAccess',
+        'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       ]
     });
 
