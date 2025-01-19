@@ -44,7 +44,7 @@ lambdaのすべてのアクション: "lambda:*"
 AssumeRoleを使いたい場合: "sts:AssumeRole" # これは特別
 ```
   
-AssumeRoleについてはまた、別の記事にまとめようと思います
+AssumeRoleについてはまた、こちらの[記事](https://zenn.dev/frusciante/articles/28cd351fe9de60)を参考にしてください
 
 ### Resource
 どのAWSリソースに対してアクション内容を適用するかを記述する
@@ -156,6 +156,5 @@ Sid: "HogeHugaExample"
 # 参考サイト
 - [IAM アイデンティティベースのポリシーの例](https://docs.aws.amazon.com/ja_jp/IAM/latest/UserGuide/access_policies_examples.html)
 - [IAM JSON ポリシー要素Statement](https://docs.aws.amazon.com/ja_jp/IAM/latest/UserGuide/reference_policies_elements_statement.html)
-- [AssumeRoleとはなんぞや！](https://zenn.dev/frusciante/articles/28cd351fe9de60)
 - [IAM ロールの PassRole と AssumeRole をもう二度と忘れないために絵を描いてみた](https://dev.classmethod.jp/articles/iam-role-passrole-assumerole/)
 - [Condition の条件キーやポリシー変数は可用性を意識しよう！という話](https://dev.classmethod.jp/articles/aws-iam-condition-key-availability/)

@@ -25,14 +25,22 @@ export class ServerlessStack extends cdk.Stack {
     const apiGateway = this.createApiGateway(envProps);
     // リソース追加
     const taskResourcePath = this.createApiGatewayResource(envProps, apiGateway, 'task');
-    // GETメソッド追加(Lambda)
+    // GETメソッド作成(Lambda)
     const getMethod = this.createMethod(envProps, apiGateway, taskResourcePath, 'task', HttpMethod.GET, getLambda);
     // DELETE メソッド(APIGateway統合)
+    // API GatewayのIAM Role作成
+    // DELETE Method作成(APIGateway統合)
 
     const methods: CfnMethod[] = [getMethod];
     // DeployとStage
     this.deployAndStageApiGateway(envProps, apiGateway, methods);
   };
+
+  // private createApiGatewayIamRole(envProps: EnvProps): CfnRole {
+  //   const policyStatementProps: PolicyStatementProps = {
+  //     effect: Effect.ALLOW,
+  //   }
+  // }
 
   /**
    * S3バケット作成
