@@ -25,13 +25,20 @@ export class ServerlessStack extends cdk.Stack {
     const apiGateway = this.createApiGateway(envProps);
     // リソース追加
     const taskResourcePath = this.createApiGatewayResource(envProps, apiGateway, 'task');
-    // メソッド追加
+    // GETメソッド追加(Lambda)
     const getMethod = this.createMethod(envProps, apiGateway, taskResourcePath, 'task', HttpMethod.GET, getLambda);
+    // DELETE メソッド(APIGateway統合)
+
     const methods: CfnMethod[] = [getMethod];
     // DeployとStage
     this.deployAndStageApiGateway(envProps, apiGateway, methods);
   };
 
+  /**
+   * S3バケット作成
+   * @param envProps 
+   * @returns 
+   */
   private createS3Bucket(envProps: EnvProps): CfnBucket {
     const applicationName = envProps.applicationName.toLocaleLowerCase();
     return new CfnBucket(this, `${envProps.envUpperCase}-${envProps.applicationName}-S3`, {
@@ -39,6 +46,11 @@ export class ServerlessStack extends cdk.Stack {
     })
   };
 
+  /**
+   * DynamoDB Table作成
+   * @param envProps 
+   * @returns 
+   */
   private createDynamoDB(envProps: EnvProps): CfnTable {
     const applicationName = envProps.applicationName.toLocaleLowerCase();
     return new CfnTable(this, `${envProps.envUpperCase}-${envProps.applicationName}-DynamoTable`, {
@@ -67,6 +79,13 @@ export class ServerlessStack extends cdk.Stack {
     })
   };
 
+  /**
+   * Lambda 実行ロール作成
+   * @param envProps 
+   * @param s3BucketArn 
+   * @param dynamoDbArn 
+   * @returns 
+   */
   private createLambdaIamRole(envProps: EnvProps, s3BucketArn: string, dynamoDbArn: string): CfnRole {
     // TODO: 後で奇麗にする
     console.log('S3 Arn', s3BucketArn);
@@ -101,6 +120,11 @@ export class ServerlessStack extends cdk.Stack {
     return LambdaRole;
   };
 
+  /**
+   * lambdaのコード保管場所作成
+   * @param envProps 
+   * @returns 
+   */
   private createLambdaAsset(envProps: EnvProps): aws_s3_assets.Asset {
     const lambdaAsset = new aws_s3_assets.Asset(this,
       `${envProps.envUpperCase}-${envProps.applicationName}-Lambda-Asset`,
@@ -111,6 +135,14 @@ export class ServerlessStack extends cdk.Stack {
     return lambdaAsset;
   }
 
+  /**
+   * GET methodのLambda作成
+   * @param envProps 
+   * @param lambdaExecRole 
+   * @param s3Bucket 
+   * @param s3Key 
+   * @returns 
+   */
   private createGetLambda(envProps: EnvProps, lambdaExecRole: CfnRole, s3Bucket: string, s3Key: string): CfnFunction {
     const lambdaExecRoleArn: string = lambdaExecRole.getAtt('Arn', ResolutionTypeHint.STRING).toString();
     const getLambda = new CfnFunction(this, `${envProps.envUpperCase}-${envProps.applicationName}-Lambda-GET`, {
@@ -131,6 +163,11 @@ export class ServerlessStack extends cdk.Stack {
     return getLambda;
   }
 
+  /**
+   * API Gateway作成
+   * @param envProps 
+   * @returns 
+   */
   private createApiGateway(envProps: EnvProps): CfnRestApi {
     const apiGateway = new CfnRestApi(this, `${envProps.envUpperCase}-${envProps.applicationName}-ApiGateway`, {
       name: `${envProps.envUpperCase}-${envProps.applicationName}`,
@@ -140,6 +177,14 @@ export class ServerlessStack extends cdk.Stack {
     return apiGateway;
   };
 
+  /**
+   * API Gatewayのリソースパス作成
+   * @param envProps 
+   * @param apiGateway 
+   * @param resourcePath 
+   * @param parentResource 
+   * @returns 
+   */
   private createApiGatewayResource(envProps: EnvProps, apiGateway: CfnRestApi, resourcePath: string, parentResource?: CfnResource): CfnResource {
     const resource: CfnResource = new CfnResource(this, `${envProps.envUpperCase}-${envProps.applicationName}-Resource-${resourcePath}`, {
       restApiId: apiGateway.ref,
@@ -150,6 +195,16 @@ export class ServerlessStack extends cdk.Stack {
     return resource;
   }
 
+  /**
+   * API Gatewayのメソッド作成
+   * @param envProps 
+   * @param apiGateway 
+   * @param resouce 
+   * @param resourcePath 
+   * @param httpMethod 
+   * @param lambda 
+   * @returns 
+   */
   private createMethod(envProps: EnvProps, apiGateway: CfnRestApi, resouce: CfnResource, resourcePath: string, httpMethod: HttpMethod, lambda?: CfnFunction): CfnMethod {
     const method = new CfnMethod(this, `${envProps.envUpperCase}-${envProps.applicationName}-${resourcePath}-${httpMethod}-Method`, {
       httpMethod: httpMethod,
@@ -176,6 +231,12 @@ export class ServerlessStack extends cdk.Stack {
     return method;
   };
 
+  /**
+   * API Gatewayのdeploymentとstage作成
+   * @param envProps 
+   * @param apiGateway 
+   * @param dependMethod 
+   */
   private deployAndStageApiGateway(envProps: EnvProps, apiGateway: CfnRestApi, dependMethod: CfnMethod[]): void {
     const deployment: CfnDeployment = new CfnDeployment(this, `${envProps.envUpperCase}-${envProps.applicationName}-Deploy`, {
       restApiId: apiGateway.ref
