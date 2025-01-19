@@ -6,7 +6,109 @@ AWSを使う上で絶対に切っても切れないのがIdentity and Access Man
 - IAMについて勉強したい人(初心者レベル)
 - Statementの各項目について忘れてしまった人
 - CDK, CloudFormationでIAM系を作る人
-# 
+
+# 本題
+## Statementの立ち位置
+解説対象のStatementはIAMにおいて、どの立ち位置にいるのかを整理します  
+図で表すと↓の赤色部分になります  
+![](./iamges/scope.PNG)  
+実際のIAM Policyだと赤丸の部分になります  
+![](./iamges/lambdaBasicPolicy.PNG)  
+
+## Statementの要素
+Statementには以下の要素が存在します  
+*が付いている要素は必須
+- Effect*
+- Action*
+- Resource*
+- Condition
+- Principal
+- Sid
+
+### Effect
+アクセスを許可するか拒否するかを記述する
+#### 記述例
+Allow or Deny
+```
+許可する場合: Effect: "Allow"
+拒否する場合: Effect: "Deny"
+```
+
+### Action
+AWSのアクション内容を記述する
+#### 記述例
+基本的にはAWSサービスがPrefixとされる
+```
+S3GetObjectを実施したい場合: "s3:GetObject"
+lambdaのすべてのアクション: "lambda:*"
+AssumeRoleを使いたい場合: "sts:AssumeRole" # これは特別
+```
+  
+AssumeRoleについてはまた、別の記事にまとめようと思います
+
+### Resource
+どのAWSリソースに対してアクション内容を適用するかを記述する
+#### 記述例
+ARNで記述する
+```
+S3Bucketを対象とする場合: "arn:aws:s3:::${bucketName}"
+全てを対象とする場合: "*"
+```
+
+### Condition
+ポリシーを適用する条件を記述する
+#### 構文
+```
+"Condition": {
+    "(条件演算子)": {
+        "(条件キー)": "(条件キーの値)"
+    }
+}
+```
+条件演算子とかはこちらの[記事](https://qiita.com/shota_hagiwara/items/e9cf6413c5c99335e658)を参考にしてください
+#### 記述例
+```
+ユーザー名のPrefixが"Hoge"だった場合のみ適用させたい
+Condition: {
+    "ArnEqals": {
+        "aws:PrincipalArn": "arn:aws:iam::account-id:user/Hoge*"
+    }
+}
+
+```
+
+### Principal
+アクションを実行するエンティティ（ユーザ、アカウント、サービス、またはその他のエンティティ）を記述する  
+主にリソースベースポリシーに使用される  
+※リソースベースポリシーについても別記事にまとめます
+#### 記述例
+```
+(例1)特定のAWSアカウントを指定する場合
+Principal: {
+    AWS: "arn:aws:iam:123456789012:root"
+}
+
+(例2)lambdaを指定する場合
+Principal: {
+    Service: "lambda.amazonaws.com"
+}
+
+```
+### Sid
+ステートメントを識別するIDを記述する
+#### 記述例
+```
+Sid: "HogeHugaExample"
+```
+
+## 実用例
+### 
+
+# まとめ
 
 # 参考サイト
+- [IAM アイデンティティベースのポリシーの例](https://docs.aws.amazon.com/ja_jp/IAM/latest/UserGuide/access_policies_examples.html)
+- [IAM JSON ポリシー要素Statement](https://docs.aws.amazon.com/ja_jp/IAM/latest/UserGuide/reference_policies_elements_statement.html)
+- [AssumeRoleとはなんぞや！](https://zenn.dev/frusciante/articles/28cd351fe9de60)
 - [IAM ロールの PassRole と AssumeRole をもう二度と忘れないために絵を描いてみた](https://dev.classmethod.jp/articles/iam-role-passrole-assumerole/)
+- [Condition の条件キーやポリシー変数は可用性を意識しよう！という話](https://dev.classmethod.jp/articles/aws-iam-condition-key-availability/)

@@ -4,10 +4,13 @@ import { CfnBucket } from 'aws-cdk-lib/aws-s3';
 import { CfnTable } from 'aws-cdk-lib/aws-dynamodb';
 import { CfnRole, PolicyDocument, PolicyStatement, PolicyStatementProps, Effect, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { CfnFunction, Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
+import { CfnRestApi, CfnResource, CfnMethod, CfnDeployment, CfnStage } from 'aws-cdk-lib/aws-apigateway';
+import { CfnPermission } from 'aws-cdk-lib/aws-lambda';
 import { aws_s3_assets } from 'aws-cdk-lib';
 import { ResolutionTypeHint } from 'aws-cdk-lib';
 // 独自モジュール
 import { EnvProps } from '../bin/serverless';
+import { get } from 'http';
 
 export class ServerlessStack extends cdk.Stack {
   constructor(scope: Construct, id: string, envProps: EnvProps, props?: cdk.StackProps) {
@@ -19,7 +22,8 @@ export class ServerlessStack extends cdk.Stack {
     const dynanoDbArn: string = dynamoDb.getAtt('Arn', ResolutionTypeHint.STRING).toString();
     const lambdaAsset = this.createLambdaAsset(envProps);
     const lambdaExecRole = this.createLambdaIamRole(envProps, s3BucketArn, dynanoDbArn);
-    const getLambda = this.createGetLambda(envProps, lambdaExecRole, lambdaAsset.s3BucketName, lambdaAsset.s3ObjectKey)
+    const getLambda = this.createGetLambda(envProps, lambdaExecRole, lambdaAsset.s3BucketName, lambdaAsset.s3ObjectKey);
+    this.createApiGateway(envProps, getLambda);
   };
 
   private createS3Bucket(envProps: EnvProps): CfnBucket {
@@ -102,7 +106,6 @@ export class ServerlessStack extends cdk.Stack {
   }
 
   private createGetLambda(envProps: EnvProps, lambdaExecRole: CfnRole, s3Bucket: string, s3Key: string): CfnFunction {
-
     const lambdaExecRoleArn: string = lambdaExecRole.getAtt('Arn', ResolutionTypeHint.STRING).toString();
     const getLambda = new CfnFunction(this, `${envProps.envUpperCase}-${envProps.applicationName}-Lambda-GET`, {
       functionName: `${envProps.applicationName}-GET-${envProps.envUpperCase}`,
@@ -120,6 +123,51 @@ export class ServerlessStack extends cdk.Stack {
     })
 
     return getLambda;
+  }
+
+  private createApiGateway(envProps: EnvProps, getLambda: CfnFunction): void {
+    const apigateway = new CfnRestApi(this, `${envProps.envUpperCase}-${envProps.applicationName}-Apigateway`, {
+      name: `${envProps.envUpperCase}-${envProps.applicationName}`,
+      description: `${envProps.envUpperCase} ${envProps.applicationName} Backend API`
+    });
+
+    const taskResource: CfnResource = new CfnResource(this, `${envProps.envUpperCase}-${envProps.applicationName}-Task-Resource`, {
+      restApiId: apigateway.ref,
+      parentId: apigateway.attrRootResourceId,
+      pathPart: 'task'
+    });
+
+    const taskGetMethod: CfnMethod = new CfnMethod(this, `${envProps.envUpperCase}-${envProps.applicationName}-Task-Get-Method`, {
+      httpMethod: 'GET',
+      resourceId: taskResource.ref,
+      restApiId: apigateway.ref,
+      authorizationType: 'NONE',
+      integration: {
+        type: 'AWS_PROXY',
+        integrationHttpMethod: 'POST',
+        uri: `arn:aws:apigateway:${this.region}:lambda:path/2015-03-31/functions/${getLambda.attrArn}/invocations`
+      }
+    });
+
+    // LambdaとAPI Gatewayを紐づける
+    new CfnPermission(this, `${envProps.envUpperCase}-${envProps.applicationName}-Get-Lambda-Permission`, {
+      action: 'lambda:InvokeFunction',
+      functionName: getLambda.attrArn,
+      principal: 'apigateway.amazonaws.com',
+      sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${apigateway.ref}/*/GET/task` // ここは/*/*/*でもよい
+    });
+
+    const deployment: CfnDeployment = new CfnDeployment(this, `${envProps.envUpperCase}-${envProps.applicationName}-Deploy`, {
+      restApiId: apigateway.ref
+    });
+
+    deployment.addDependency(taskGetMethod);
+
+    new CfnStage(this, `${envProps.envUpperCase}-${envProps.applicationName}-Stage`, {
+      restApiId: apigateway.ref,
+      stageName: `${envProps.envLowerCase}`,
+      deploymentId: deployment.ref
+    });
   }
 
 }
