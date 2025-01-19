@@ -3,14 +3,13 @@ import { Construct } from 'constructs';
 import { CfnBucket } from 'aws-cdk-lib/aws-s3';
 import { CfnTable } from 'aws-cdk-lib/aws-dynamodb';
 import { CfnRole, PolicyDocument, PolicyStatement, PolicyStatementProps, Effect, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
-import { CfnFunction, Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
+import { CfnFunction, Architecture, Runtime, HttpMethod } from 'aws-cdk-lib/aws-lambda';
 import { CfnRestApi, CfnResource, CfnMethod, CfnDeployment, CfnStage } from 'aws-cdk-lib/aws-apigateway';
 import { CfnPermission } from 'aws-cdk-lib/aws-lambda';
 import { aws_s3_assets } from 'aws-cdk-lib';
 import { ResolutionTypeHint } from 'aws-cdk-lib';
 // 独自モジュール
 import { EnvProps } from '../bin/serverless';
-import { get } from 'http';
 
 export class ServerlessStack extends cdk.Stack {
   constructor(scope: Construct, id: string, envProps: EnvProps, props?: cdk.StackProps) {
@@ -23,7 +22,14 @@ export class ServerlessStack extends cdk.Stack {
     const lambdaAsset = this.createLambdaAsset(envProps);
     const lambdaExecRole = this.createLambdaIamRole(envProps, s3BucketArn, dynanoDbArn);
     const getLambda = this.createGetLambda(envProps, lambdaExecRole, lambdaAsset.s3BucketName, lambdaAsset.s3ObjectKey);
-    this.createApiGateway(envProps, getLambda);
+    const apiGateway = this.createApiGateway(envProps);
+    // リソース追加
+    const taskResourcePath = this.createApiGatewayResource(envProps, apiGateway, 'task');
+    // メソッド追加
+    const getMethod = this.createMethod(envProps, apiGateway, taskResourcePath, 'task', HttpMethod.GET, getLambda);
+    const methods: CfnMethod[] = [getMethod];
+    // DeployとStage
+    this.deployAndStageApiGateway(envProps, apiGateway, methods);
   };
 
   private createS3Bucket(envProps: EnvProps): CfnBucket {
@@ -125,49 +131,65 @@ export class ServerlessStack extends cdk.Stack {
     return getLambda;
   }
 
-  private createApiGateway(envProps: EnvProps, getLambda: CfnFunction): void {
-    const apigateway = new CfnRestApi(this, `${envProps.envUpperCase}-${envProps.applicationName}-Apigateway`, {
+  private createApiGateway(envProps: EnvProps): CfnRestApi {
+    const apiGateway = new CfnRestApi(this, `${envProps.envUpperCase}-${envProps.applicationName}-ApiGateway`, {
       name: `${envProps.envUpperCase}-${envProps.applicationName}`,
       description: `${envProps.envUpperCase} ${envProps.applicationName} Backend API`
     });
 
-    const taskResource: CfnResource = new CfnResource(this, `${envProps.envUpperCase}-${envProps.applicationName}-Task-Resource`, {
-      restApiId: apigateway.ref,
-      parentId: apigateway.attrRootResourceId,
-      pathPart: 'task'
+    return apiGateway;
+  };
+
+  private createApiGatewayResource(envProps: EnvProps, apiGateway: CfnRestApi, resourcePath: string, parentResource?: CfnResource): CfnResource {
+    const resource: CfnResource = new CfnResource(this, `${envProps.envUpperCase}-${envProps.applicationName}-Resource-${resourcePath}`, {
+      restApiId: apiGateway.ref,
+      parentId: apiGateway.attrRootResourceId,
+      pathPart: resourcePath
     });
 
-    const taskGetMethod: CfnMethod = new CfnMethod(this, `${envProps.envUpperCase}-${envProps.applicationName}-Task-Get-Method`, {
-      httpMethod: 'GET',
-      resourceId: taskResource.ref,
-      restApiId: apigateway.ref,
-      authorizationType: 'NONE',
-      integration: {
+    return resource;
+  }
+
+  private createMethod(envProps: EnvProps, apiGateway: CfnRestApi, resouce: CfnResource, resourcePath: string, httpMethod: HttpMethod, lambda?: CfnFunction): CfnMethod {
+    const method = new CfnMethod(this, `${envProps.envUpperCase}-${envProps.applicationName}-${resourcePath}-${httpMethod}-Method`, {
+      httpMethod: httpMethod,
+      restApiId: apiGateway.ref,
+      resourceId: resouce.ref,
+      authorizationType: 'NONE'
+    });
+
+    if (lambda) {
+      method.integration = {
         type: 'AWS_PROXY',
         integrationHttpMethod: 'POST',
-        uri: `arn:aws:apigateway:${this.region}:lambda:path/2015-03-31/functions/${getLambda.attrArn}/invocations`
+        uri: `arn:aws:apigateway:${this.region}:lambda:path/2015-03-31/functions/${lambda.attrArn}/invocations`
       }
-    });
 
-    // LambdaとAPI Gatewayを紐づける
-    new CfnPermission(this, `${envProps.envUpperCase}-${envProps.applicationName}-Get-Lambda-Permission`, {
-      action: 'lambda:InvokeFunction',
-      functionName: getLambda.attrArn,
-      principal: 'apigateway.amazonaws.com',
-      sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${apigateway.ref}/*/GET/task` // ここは/*/*/*でもよい
-    });
+      new CfnPermission(this, `${envProps.envUpperCase}-${envProps.applicationName}-${httpMethod}-Lambda-Permission`, {
+        action: 'lambda:InvokeFunction',
+        functionName: lambda.attrArn,
+        principal: 'apigateway.amazonaws.com',
+        sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${apiGateway.ref}/*/${httpMethod}/${resourcePath}`
+      });
+    }
 
+    return method;
+  };
+
+  private deployAndStageApiGateway(envProps: EnvProps, apiGateway: CfnRestApi, dependMethod: CfnMethod[]): void {
     const deployment: CfnDeployment = new CfnDeployment(this, `${envProps.envUpperCase}-${envProps.applicationName}-Deploy`, {
-      restApiId: apigateway.ref
+      restApiId: apiGateway.ref
     });
 
-    deployment.addDependency(taskGetMethod);
+    dependMethod.forEach((method) => {
+      deployment.addDependency(method);
+    })
 
     new CfnStage(this, `${envProps.envUpperCase}-${envProps.applicationName}-Stage`, {
-      restApiId: apigateway.ref,
+      restApiId: apiGateway.ref,
       stageName: `${envProps.envLowerCase}`,
       deploymentId: deployment.ref
     });
-  }
+  };
 
 }
