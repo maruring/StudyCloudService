@@ -23,24 +23,96 @@ export class ServerlessStack extends cdk.Stack {
     const lambdaExecRole = this.createLambdaIamRole(envProps, s3BucketArn, dynanoDbArn);
     const getLambda = this.createGetLambda(envProps, lambdaExecRole, lambdaAsset.s3BucketName, lambdaAsset.s3ObjectKey);
     const apiGateway = this.createApiGateway(envProps);
-    // リソース追加
-    const taskResourcePath = this.createApiGatewayResource(envProps, apiGateway, 'task');
+    const apiGatewayRole = this.createApiGatewayIamRole(envProps);
+    // task リソース追加
+    const taskResourcePath = this.createApiGatewayResource(envProps, apiGateway, 'tasks');
+    // ${taskId}メソッドの作成
+    const taskIdResourcePath = this.createApiGatewayResource(envProps, apiGateway, '{taskId}', taskResourcePath);
     // GETメソッド作成(Lambda)
-    const getMethod = this.createMethod(envProps, apiGateway, taskResourcePath, 'task', HttpMethod.GET, getLambda);
-    // DELETE メソッド(APIGateway統合)
-    // API GatewayのIAM Role作成
+    const getMethod = this.createMethodByLambda(envProps, apiGateway, taskIdResourcePath, 'task', HttpMethod.GET, getLambda);
     // DELETE Method作成(APIGateway統合)
+    const deleteMethod = this.createDeleteMethod(envProps, apiGateway, taskIdResourcePath, apiGatewayRole, dynamoDb);
 
-    const methods: CfnMethod[] = [getMethod];
+    const methods: CfnMethod[] = [getMethod, deleteMethod];
     // DeployとStage
     this.deployAndStageApiGateway(envProps, apiGateway, methods);
   };
 
-  // private createApiGatewayIamRole(envProps: EnvProps): CfnRole {
-  //   const policyStatementProps: PolicyStatementProps = {
-  //     effect: Effect.ALLOW,
-  //   }
-  // }
+  /**
+   * APIGatewayのRole作成
+   * @param envProps 
+   * @returns 
+   */
+  private createApiGatewayIamRole(envProps: EnvProps): CfnRole {
+    const servicePrincipal = new ServicePrincipal('apigateway.amazonaws.com');
+    const policyStatementProps: PolicyStatementProps = {
+      effect: Effect.ALLOW,
+      actions: ['sts:AssumeRole'],
+      principals: [servicePrincipal]
+    };
+
+    const policyStatement = new PolicyStatement(policyStatementProps);
+    const policyDocument = new PolicyDocument({
+      statements: [policyStatement]
+    });
+
+    const apiGatewayRole = new CfnRole(this, `${envProps.envUpperCase}-${envProps.applicationName}-ApiGateway-Role`, {
+      roleName: `${envProps.envUpperCase}-${envProps.applicationName}-ApiGateway`,
+      description: `${envProps.envUpperCase} ApiGateway Role`,
+      assumeRolePolicyDocument: policyDocument,
+      // TODO: 最小権限の原則から後でする
+      managedPolicyArns: [
+        'arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs',
+        'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
+      ]
+    })
+
+    return apiGatewayRole;
+  };
+
+  // TODO: 後で奇麗にする
+  private createDeleteMethod(envProps: EnvProps, apiGateway: CfnRestApi, resoucePath: CfnResource, apiGatewayRole: CfnRole, targetTable: CfnTable): CfnMethod {
+
+    const requestTemplate = {
+      TableName: targetTable.ref,
+      Key: {
+        userId: {
+          "S": "input.param('taskId')"
+        }
+      }
+    };
+
+    const integrationResponse: CfnMethod.IntegrationResponseProperty = {
+      statusCode: '204'
+    };
+
+    const deleteMethod = new CfnMethod(this, `${envProps.envUpperCase}-${envProps.applicationName}-Task-Delete-Method`,{
+      httpMethod: HttpMethod.DELETE,
+      restApiId: apiGateway.ref,
+      resourceId: resoucePath.ref,
+      authorizationType: 'NONE',
+      requestParameters: {
+        'method.request.path.taskId': true
+      },
+      methodResponses: [{'statusCode': '204'}],
+      integration: {
+        type: 'AWS',
+        integrationHttpMethod: HttpMethod.POST,
+        credentials: apiGatewayRole.getAtt('Arn', ResolutionTypeHint.STRING).toString(),
+        uri: `arn:aws:apigateway:${this.region}:dynamodb:action/DeleteItem`,
+        passthroughBehavior: 'WHEN_NO_TEMPLATES',
+        requestParameters: {
+          'integration.request.path.taskId': 'method.request.path.taskId'
+        },
+        requestTemplates: {
+          'application/json': JSON.stringify(requestTemplate)
+        },
+        integrationResponses: [integrationResponse]
+      }
+    })
+
+    return deleteMethod;
+  };
 
   /**
    * S3バケット作成
@@ -194,9 +266,11 @@ export class ServerlessStack extends cdk.Stack {
    * @returns 
    */
   private createApiGatewayResource(envProps: EnvProps, apiGateway: CfnRestApi, resourcePath: string, parentResource?: CfnResource): CfnResource {
+    const parentId = parentResource !== undefined ? parentResource.attrResourceId : apiGateway.attrRootResourceId
+    
     const resource: CfnResource = new CfnResource(this, `${envProps.envUpperCase}-${envProps.applicationName}-Resource-${resourcePath}`, {
       restApiId: apiGateway.ref,
-      parentId: apiGateway.attrRootResourceId,
+      parentId: parentId,
       pathPart: resourcePath
     });
 
@@ -213,20 +287,18 @@ export class ServerlessStack extends cdk.Stack {
    * @param lambda 
    * @returns 
    */
-  private createMethod(envProps: EnvProps, apiGateway: CfnRestApi, resouce: CfnResource, resourcePath: string, httpMethod: HttpMethod, lambda?: CfnFunction): CfnMethod {
+  private createMethodByLambda(envProps: EnvProps, apiGateway: CfnRestApi, resouce: CfnResource, resourcePath: string, httpMethod: HttpMethod, lambda: CfnFunction): CfnMethod {
     const method = new CfnMethod(this, `${envProps.envUpperCase}-${envProps.applicationName}-${resourcePath}-${httpMethod}-Method`, {
       httpMethod: httpMethod,
       restApiId: apiGateway.ref,
       resourceId: resouce.ref,
-      authorizationType: 'NONE'
-    });
-
-    if (lambda) {
-      method.integration = {
+      authorizationType: 'NONE',
+      integration: {
         type: 'AWS_PROXY',
         integrationHttpMethod: 'POST',
         uri: `arn:aws:apigateway:${this.region}:lambda:path/2015-03-31/functions/${lambda.attrArn}/invocations`
       }
+    });
 
       new CfnPermission(this, `${envProps.envUpperCase}-${envProps.applicationName}-${httpMethod}-Lambda-Permission`, {
         action: 'lambda:InvokeFunction',
@@ -234,7 +306,6 @@ export class ServerlessStack extends cdk.Stack {
         principal: 'apigateway.amazonaws.com',
         sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${apiGateway.ref}/*/${httpMethod}/${resourcePath}`
       });
-    }
 
     return method;
   };
